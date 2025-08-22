@@ -1,106 +1,69 @@
 const {
-  makeWASocket,
-  useMultiFileAuthState
-} = require("@whiskeysockets/baileys");
-const config = require("./config");
+    default: makeWASocket,
+    useMultiFileAuthState,
+    makeCacheableSignalKeyStore
+} = require('@whiskeysockets/baileys');
+const zlib = require('zlib');
+
+const SESSION_ID = process.env.SESSION_ID; // 👈 Heroku Config Vars me apna session id daalna
+
+async function useSessionString(sessionString) {
+    let [prefix, base64Data] = sessionString.split(";;;");
+    if (!base64Data) throw new Error("❌ Invalid session format!");
+
+    let compressed = Buffer.from(base64Data, "base64");
+    let jsonData = zlib.gunzipSync(compressed).toString();
+    return JSON.parse(jsonData);
+}
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./auth_info");
-
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: !config.sessionId
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  // ✅ Connection Update Listener
-  sock.ev.on("connection.update", async (update) => {
-    const { connection } = update;
-
-    if (connection === "open") {
-      console.log(`✅ Bot Connected as: ${sock.user.id}`);
-
-      // Owner ko message ab safe hai
-      await sock.sendMessage(config.owner + "@s.whatsapp.net", {
-        text: `✅ *${config.botName} Connected Successfully!*\n\n📌 *Session:* ${config.sessionId}`
-      });
+    if (!SESSION_ID) {
+        console.error("❌ SESSION_ID not found! Heroku Config Vars me set karo.");
+        return;
     }
 
-    if (connection === "close") {
-      console.log("❌ Connection closed, reconnecting...");
-      startBot();
-    }
-  });
-
-  // 📌 Message Listener
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message || !msg.key.remoteJid) return;
-
-    const from = msg.key.remoteJid;
-    const type = Object.keys(msg.message)[0];
-    const body =
-      msg.message.conversation ||
-      msg.message[type]?.text ||
-      msg.message[type]?.caption ||
-      "";
-
-    if (!body.startsWith(config.prefix)) return;
-    const cmd = body.slice(config.prefix.length).trim().split(" ")[0].toLowerCase();
-    const args = body.split(" ").slice(1);
-
-    // 🔹 Stylish Menu + Voice Note
-    if (cmd === "menu") {
-      const menuText = `🌟 *${config.botName} MENU* 🌟
-
-╭───❏ Commands ❏
-│ ✦ .owner → Owner info
-│ ✦ .jid   → Get current chat JID
-│ ✦ .forward [jid] (reply) → Forward msg
-╰───────────────`;
-
-      // Pehle menu text bhejo
-      await sock.sendMessage(from, { text: menuText });
-
-      // Ab voice note bhejo
-      await sock.sendMessage(from, {
-        audio: { url: "https://files.catbox.moe/9j4qg6.mp3" },
-        mimetype: "audio/mp4",
-        ptt: true
-      });
+    let creds;
+    try {
+        creds = await useSessionString(SESSION_ID);
+    } catch (err) {
+        console.error("❌ Invalid Session ID:", err);
+        return;
     }
 
-    // 🔹 Owner
-    if (cmd === "owner") {
-      await sock.sendMessage(from, {
-        text: `👑 *Owner Info*\n\nName: NEXTY\nNumber: wa.me/${config.owner}`
-      });
-    }
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    Object.assign(state.creds, creds); // 👈 Apna session set kar diya
 
-    // 🔹 JID
-    if (cmd === "jid") {
-      await sock.sendMessage(from, {
-        text: `📌 *Current JID:*\n\`${from}\``
-      });
-    }
+    const sock = makeWASocket({
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, console.log)
+        },
+        printQRInTerminal: false // Heroku pe QR ki zarurat nahi
+    });
 
-    // 🔹 Forward (reply to msg)
-    if (cmd === "forward") {
-      if (!args[0]) return await sock.sendMessage(from, { text: "❌ Please provide a JID" });
-      if (!msg.message.extendedTextMessage?.contextInfo?.stanzaId) {
-        return await sock.sendMessage(from, { text: "❌ Please reply to a message to forward" });
-      }
+    sock.ev.on('creds.update', saveCreds);
 
-      const targetJid = args[0];
-      const quotedMsg = await sock.loadMessage(from, msg.message.extendedTextMessage.contextInfo.stanzaId);
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            console.log("🔴 Disconnected, reconnecting...");
+            startBot();
+        } else if (connection === 'open') {
+            console.log("🟢 Bot Connected Successfully!");
+        }
+    });
 
-      if (quotedMsg) {
-        await sock.sendMessage(targetJid, { forward: quotedMsg }, { quoted: null });
-        await sock.sendMessage(from, { text: `✅ Message forwarded to ${targetJid}` });
-      }
-    }
-  });
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.message) return;
+
+        const from = msg.key.remoteJid;
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+
+        if (text.toLowerCase() === "ping") {
+            await sock.sendMessage(from, { text: "pong ✅" });
+        }
+    });
 }
 
 startBot();
