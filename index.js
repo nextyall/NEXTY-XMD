@@ -14,10 +14,23 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ✅ Bot Connected message
-  console.log(`✅ Bot Connected as: ${config.botName} | Session: ${config.sessionId}`);
-  await sock.sendMessage(config.owner + "@s.whatsapp.net", {
-    text: `✅ *${config.botName} Connected Successfully!*\n\n📌 *Session:* ${config.sessionId}`
+  // ✅ Connection Update Listener
+  sock.ev.on("connection.update", async (update) => {
+    const { connection } = update;
+
+    if (connection === "open") {
+      console.log(`✅ Bot Connected as: ${sock.user.id}`);
+
+      // Owner ko message ab safe hai
+      await sock.sendMessage(config.owner + "@s.whatsapp.net", {
+        text: `✅ *${config.botName} Connected Successfully!*\n\n📌 *Session:* ${config.sessionId}`
+      });
+    }
+
+    if (connection === "close") {
+      console.log("❌ Connection closed, reconnecting...");
+      startBot();
+    }
   });
 
   // 📌 Message Listener
@@ -54,7 +67,7 @@ async function startBot() {
       await sock.sendMessage(from, {
         audio: { url: "https://files.catbox.moe/9j4qg6.mp3" },
         mimetype: "audio/mp4",
-        ptt: true // voice note (push-to-talk style)
+        ptt: true
       });
     }
 
