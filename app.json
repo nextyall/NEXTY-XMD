@@ -1,0 +1,21 @@
+{
+  "name": "NEXTY-XMD",
+  "description": "NEXTY-XMD WhatsApp Bot",
+  "env": {
+    "SESSION_ID": {
+      "description": "Paste your WhatsApp Session ID here"
+    },
+    "OWNER_NUMBER": {
+      "description": "Your WhatsApp number with country code",
+      "value": "923192084504"
+    },
+    "BOT_NAME": {
+      "description": "Your Bot Name",
+      "value": "NEXTY-XMD"
+    },
+    "PREFIX": {
+      "description": "Command prefix",
+      "value": "."
+    }
+  }
+}
